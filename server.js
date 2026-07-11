@@ -13,7 +13,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
 app.use('/uploads', express.static('uploads'));
 
-// CORS pour permettre les requêtes
+// CORS
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -22,14 +22,13 @@ app.use((req, res, next) => {
     next();
 });
 
-// Chargement des configs
-let QWEN_KEY = '';
-let GEMINI_KEY = '';
-let SYSTEM_PROMPT = 'Tu es Oméga, un assistant IA.';
+// ===== CLÉS API INTÉGRÉES =====
+// Remplacez ces valeurs par vos vraies clés API
+const QWEN_KEY = 'sk-ws-H.XMPLHM.4mFo.MEQCIEUJg2XzJR0vVFzOdCRVBcJZ3Yt82xowwCoiX0hroWzdAiAlRIhNV9TORHzK9XfP-3JRIXVH3PfeYiseg2Qx2hhWug';
+const GEMINI_KEY = 'AQ.Ab8RN6Jr3Z1kb1PIzE9A4QnOkl8Pyfnf6nPze5opd8vhKO3s0A';
 
-try { QWEN_KEY = fs.readFileSync(path.join(__dirname, 'api.txt'), 'utf8').trim(); } catch (e) { console.warn('api.txt manquant'); }
-try { GEMINI_KEY = fs.readFileSync(path.join(__dirname, 'r.txt'), 'utf8').trim(); } catch (e) { console.warn('r.txt manquant'); }
-try { SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'config.txt'), 'utf8').trim(); } catch (e) {}
+// System prompt
+const SYSTEM_PROMPT = 'Tu es Oméga, un assistant IA avancé capable de recherche web et de génération de code. Quand tu génères du code, assure-toi qu\'il soit complet, fonctionnel, bien commenté et suivant les bonnes pratiques.';
 
 const sessionHistories = {};
 
@@ -41,7 +40,7 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Route chat NON-streaming (plus stable)
+// Route chat
 app.post('/api/chat', upload.single('file'), async (req, res) => {
     const { message, sessionId, version, enableSearch } = req.body;
     const file = req.file;
@@ -92,11 +91,15 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
 
         if (version === '1.0') {
             // GEMINI
-            if (!GEMINI_KEY) throw new Error('Clé Gemini manquante (r.txt)');
+            if (!GEMINI_KEY || GEMINI_KEY === 'VOTRE_CLE_GEMINI_ICI') {
+                throw new Error('Clé Gemini non configurée dans le code');
+            }
             aiResponse = await callGemini(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch);
         } else {
             // QWEN
-            if (!QWEN_KEY) throw new Error('Clé Qwen manquante (api.txt)');
+            if (!QWEN_KEY) {
+                throw new Error('Clé Qwen non configurée dans le code');
+            }
             aiResponse = await callQwen(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch);
         }
 
@@ -193,4 +196,6 @@ async function callGemini(history, systemPrompt, enableSearch) {
 app.listen(PORT, () => {
     console.log(`✅ Serveur Oméga démarré sur le port ${PORT}`);
     console.log(`📡 Santé: http://localhost:${PORT}/health`);
+    console.log(`🔑 Clé Qwen: ${QWEN_KEY ? '✓ Configurée' : '✗ Manquante'}`);
+    console.log(`🔑 Clé Gemini: ${GEMINI_KEY && GEMINI_KEY !== 'VOTRE_CLE_GEMINI_ICI' ? '✓ Configurée' : '✗ Manquante'}`);
 });
