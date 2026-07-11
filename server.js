@@ -6,20 +6,13 @@ const multer = require('multer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const upload = multer({ dest: 'uploads/', limits: { fileSize: 10 * 1024 * 1024 } });
 
-// Configuration multer
-const upload = multer({ 
-    dest: 'uploads/',
-    limits: { fileSize: 10 * 1024 * 1024 } // 10MB max
-});
-
-// Middleware
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static('public'));
 app.use('/uploads', express.static('uploads'));
 
-// CORS
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -30,56 +23,46 @@ app.use((req, res, next) => {
 
 // ===== CLÉS API =====
 const QWEN_KEY = 'sk-ws-H.XMPLHM.4mFo.MEQCIEUJg2XzJR0vVFzOdCRVBcJZ3Yt82xowwCoiX0hroWzdAiAlRIhNV9TORHzK9XfP-3JRIXVH3PfeYiseg2Qx2hhWug';
-const GEMINI_KEY = 'VOTRE_CLE_GEMINI_ICI'; // Remplacez par votre clé
+const GEMINI_KEY = 'VOTRE_CLE_GEMINI_ICI';
 
-const SYSTEM_PROMPT = 'Tu es Oméga, un assistant IA avancé.';
+const SYSTEM_PROMPT = 'Tu es Oméga, un assistant IA avancé. Réponds en français.';
 const sessionHistories = {};
 
-// Routes
-app.get('/health', (req, res) => {
-    res.status(200).send('OK - Serveur actif');
-});
+app.get('/health', (req, res) => res.status(200).send('OK'));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Route chat PRINCIPALE
 app.post('/api/chat', upload.single('file'), async (req, res) => {
-    console.log('=== NOUVELLE REQUÊTE ===');
-    console.log('Headers:', req.headers);
-    console.log('Body:', req.body);
-    console.log('File:', req.file);
+    const startTime = Date.now();
+    console.log('\n========== NOUVELLE REQUÊTE ==========');
     
     const { message, sessionId, version, enableSearch } = req.body;
     const file = req.file;
 
-    // Validation
-    if (!sessionId) {
-        console.error(' Session ID manquant');
-        return res.status(400).json({ error: 'Session ID requis' });
-    }
-
-    if (!message && !file) {
-        console.error(' Message et fichier vides');
-        return res.status(400).json({ error: 'Message ou fichier requis' });
-    }
-
-    console.log('✅ Données reçues:', {
-        sessionId: sessionId.substring(0, 20) + '...',
-        message: message ? message.substring(0, 50) + '...' : 'null',
+    console.log('📥 Données reçues:', {
+        sessionId,
+        message: message?.substring(0, 100),
         version,
         enableSearch,
         hasFile: !!file
     });
 
-    // Init session
+    if (!sessionId) {
+        console.error('❌ Session ID manquant');
+        return res.status(400).json({ error: 'Session ID requis' });
+    }
+
+    if (!message && !file) {
+        console.error('❌ Message et fichier vides');
+        return res.status(400).json({ error: 'Message ou fichier requis' });
+    }
+
     if (!sessionHistories[sessionId]) {
         sessionHistories[sessionId] = [];
+        console.log('🆕 Nouvelle session créée:', sessionId);
     }
 
     try {
-        // Préparation du contenu
+        // Préparation contenu
         let currentTurnParts = [];
         
         if (message && message.trim()) {
@@ -89,7 +72,7 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
         if (file) {
             const fileBuffer = fs.readFileSync(file.path);
             const base64Data = fileBuffer.toString('base64');
-            fs.unlinkSync(file.path); // Supprime le fichier temporaire
+            fs.unlinkSync(file.path);
 
             if (file.mimetype.startsWith('image/')) {
                 currentTurnParts.push({
@@ -98,7 +81,6 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
                     mime: file.mimetype,
                     base64: base64Data
                 });
-                console.log('✅ Image traitée');
             } else {
                 const textContent = fileBuffer.length < 50000 
                     ? fileBuffer.toString('utf-8') 
@@ -107,7 +89,6 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
                     type: "text", 
                     text: `Fichier ${file.originalname}:\n${textContent}` 
                 });
-                console.log('✅ Fichier texte traité');
             }
         }
 
@@ -115,58 +96,73 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
             throw new Error('Aucun contenu valide');
         }
 
-        // Ajout à l'historique
-        sessionHistories[sessionId].push({ 
-            role: 'user', 
-            content: currentTurnParts 
-        });
+        sessionHistories[sessionId].push({ role: 'user', content: currentTurnParts });
         
-        // Limite historique
         if (sessionHistories[sessionId].length > 20) {
             sessionHistories[sessionId] = sessionHistories[sessionId].slice(-20);
         }
 
         console.log(`📡 Appel API ${version === '1.0' ? 'Gemini' : 'Qwen'}...`);
+        console.log(`🔑 Clé utilisée: ${version === '1.0' ? GEMINI_KEY.substring(0, 10) + '...' : QWEN_KEY.substring(0, 10) + '...'}`);
 
         let aiResponse = '';
 
         if (version === '1.0') {
             if (!GEMINI_KEY || GEMINI_KEY === 'VOTRE_CLE_GEMINI_ICI') {
-                throw new Error('Clé Gemini non configurée');
+                throw new Error('Clé Gemini non configurée. Utilisez Oméga 1.5 ou ajoutez votre clé Gemini.');
             }
-            aiResponse = await callGemini(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch === 'true');
+            aiResponse = await callGemini(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch === 'true' || enableSearch === true);
         } else {
             if (!QWEN_KEY) {
                 throw new Error('Clé Qwen non configurée');
             }
-            aiResponse = await callQwen(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch === 'true');
+            aiResponse = await callQwen(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch === 'true' || enableSearch === true);
         }
 
-        console.log('✅ Réponse IA reçue:', aiResponse.substring(0, 100) + '...');
+        if (!aiResponse || aiResponse.trim() === '') {
+            throw new Error('Réponse vide de l\'IA');
+        }
 
-        // Sauvegarde réponse
-        sessionHistories[sessionId].push({ 
-            role: 'assistant', 
-            content: aiResponse 
-        });
+        console.log('✅ Réponse reçue:', aiResponse.substring(0, 150) + '...');
+        console.log(`⏱️ Temps total: ${Date.now() - startTime}ms`);
+
+        sessionHistories[sessionId].push({ role: 'assistant', content: aiResponse });
 
         res.json({ response: aiResponse });
 
     } catch (error) {
-        console.error('❌ ERREUR:', error.message);
+        const elapsed = Date.now() - startTime;
+        console.error(`❌ ERREUR après ${elapsed}ms:`, error.message);
+        
         if (error.response) {
-            console.error('Détails API:', error.response.data);
+            console.error('📋 Réponse API:', {
+                status: error.response.status,
+                data: error.response.data
+            });
+        }
+        
+        let errorMessage = error.message || 'Erreur serveur';
+        
+        if (error.code === 'ECONNABORTED') {
+            errorMessage = 'Timeout: L\'IA met trop de temps à répondre';
+        } else if (error.response?.status === 401) {
+            errorMessage = 'Clé API invalide ou expirée';
+        } else if (error.response?.status === 429) {
+            errorMessage = 'Trop de requêtes. Attendez quelques secondes.';
+        } else if (error.response?.data?.error) {
+            errorMessage = error.response.data.error.message || errorMessage;
         }
         
         res.status(500).json({ 
-            error: error.message || 'Erreur serveur',
-            details: error.response?.data?.message || error.toString()
+            error: errorMessage,
+            details: process.env.NODE_ENV === 'development' ? error.toString() : undefined
         });
     }
 });
 
-// Fonction appel Qwen
 async function callQwen(history, systemPrompt, enableSearch) {
+    console.log('🔄 Appel Qwen API...');
+    
     const messages = [
         { role: 'system', content: systemPrompt },
         ...history.map(msg => ({
@@ -176,7 +172,8 @@ async function callQwen(history, systemPrompt, enableSearch) {
                 : msg.content.map(p => {
                     if (p.type === 'text') return { type: 'text', text: p.text };
                     if (p.type === 'image_url') return { type: 'image_url', image_url: { url: p.image_url.url } };
-                })
+                    return null;
+                }).filter(Boolean)
         }))
     ];
 
@@ -187,25 +184,49 @@ async function callQwen(history, systemPrompt, enableSearch) {
         max_tokens: 8000
     };
 
-    if (enableSearch) payload.enable_search = true;
+    if (enableSearch) {
+        payload.enable_search = true;
+        console.log('🔍 Recherche web activée');
+    }
 
-    const response = await axios.post(
-        'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions',
-        payload,
-        {
-            headers: { 
-                'Authorization': `Bearer ${QWEN_KEY}`, 
-                'Content-Type': 'application/json' 
-            },
-            timeout: 60000
+    try {
+        const response = await axios.post(
+            'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions',
+            payload,
+            {
+                headers: { 
+                    'Authorization': `Bearer ${QWEN_KEY}`, 
+                    'Content-Type': 'application/json' 
+                },
+                timeout: 90000,
+                validateStatus: (status) => status < 500
+            }
+        );
+
+        if (response.status !== 200) {
+            console.error('❌ Qwen API error:', response.status, response.data);
+            throw new Error(`Qwen API error ${response.status}: ${response.data?.error?.message || 'Unknown error'}`);
         }
-    );
-    
-    return response.data.choices[0].message.content;
+
+        if (!response.data?.choices?.[0]?.message?.content) {
+            console.error('❌ Réponse Qwen invalide:', response.data);
+            throw new Error('Réponse invalide de Qwen');
+        }
+
+        return response.data.choices[0].message.content;
+
+    } catch (error) {
+        if (error.response) {
+            throw error;
+        }
+        console.error('❌ Erreur réseau Qwen:', error.message);
+        throw new Error(`Erreur de connexion à Qwen: ${error.message}`);
+    }
 }
 
-// Fonction appel Gemini
 async function callGemini(history, systemPrompt, enableSearch) {
+    console.log('🔄 Appel Gemini API...');
+    
     const contents = history.map(msg => {
         const role = msg.role === 'assistant' ? 'model' : 'user';
         let parts = [];
@@ -243,23 +264,43 @@ async function callGemini(history, systemPrompt, enableSearch) {
                 }
             }
         }];
+        console.log('🔍 Recherche web activée');
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
-    
-    const response = await axios.post(url, payload, {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 60000
-    });
-    
-    return response.data.candidates[0].content.parts[0].text;
+    try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
+        
+        const response = await axios.post(url, payload, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 90000,
+            validateStatus: (status) => status < 500
+        });
+
+        if (response.status !== 200) {
+            console.error('❌ Gemini API error:', response.status, response.data);
+            throw new Error(`Gemini API error ${response.status}: ${response.data?.error?.message || 'Unknown error'}`);
+        }
+
+        if (!response.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+            console.error('❌ Réponse Gemini invalide:', response.data);
+            throw new Error('Réponse invalide de Gemini');
+        }
+
+        return response.data.candidates[0].content.parts[0].text;
+
+    } catch (error) {
+        if (error.response) {
+            throw error;
+        }
+        console.error('❌ Erreur réseau Gemini:', error.message);
+        throw new Error(`Erreur de connexion à Gemini: ${error.message}`);
+    }
 }
 
-// Démarrage serveur
 app.listen(PORT, () => {
     console.log('\n🚀 SERVEUR OMÉGA DÉMARRÉ');
     console.log(`📡 Port: ${PORT}`);
-    console.log(`🔑 Qwen: ${QWEN_KEY ? '✓' : '✗'}`);
-    console.log(`🔑 Gemini: ${GEMINI_KEY !== 'VOTRE_CLE_GEMINI_ICI' ? '✓' : '✗'}`);
-    console.log(` Health: http://localhost:${PORT}/health\n`);
+    console.log(`🔑 Qwen: ${QWEN_KEY ? '✓ Configurée' : '✗ Manquante'}`);
+    console.log(`🔑 Gemini: ${GEMINI_KEY !== 'VOTRE_CLE_GEMINI_ICI' ? '✓ Configurée' : '✗ Manquante'}`);
+    console.log(`🌐 URL: https://omega-chat-xny9.onrender.com\n`);
 });
