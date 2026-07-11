@@ -1,7 +1,7 @@
 {
   "name": "omega-chat",
-  "version": "2.0.0",
-  "description": "Chat IA Oméga avec recherche web et génération de code",
+  "version": "2.1.0",
+  "description": "Chat IA Oméga avec streaming temps réel",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
