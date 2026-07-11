@@ -13,70 +13,51 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
 app.use('/uploads', express.static('uploads'));
 
-// --- CHARGEMENT DES CONFIGURATIONS ---
+// CORS pour permettre les requêtes
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') return res.sendStatus(200);
+    next();
+});
+
+// Chargement des configs
 let QWEN_KEY = '';
 let GEMINI_KEY = '';
-let SYSTEM_PROMPT = 'Tu es Oméga, un assistant IA avancé capable de recherche web et de génération de code.';
+let SYSTEM_PROMPT = 'Tu es Oméga, un assistant IA.';
 
-try { QWEN_KEY = fs.readFileSync(path.join(__dirname, 'api.txt'), 'utf8').trim(); } catch (e) {}
-try { GEMINI_KEY = fs.readFileSync(path.join(__dirname, 'r.txt'), 'utf8').trim(); } catch (e) {}
+try { QWEN_KEY = fs.readFileSync(path.join(__dirname, 'api.txt'), 'utf8').trim(); } catch (e) { console.warn('api.txt manquant'); }
+try { GEMINI_KEY = fs.readFileSync(path.join(__dirname, 'r.txt'), 'utf8').trim(); } catch (e) { console.warn('r.txt manquant'); }
 try { SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'config.txt'), 'utf8').trim(); } catch (e) {}
 
 const sessionHistories = {};
 
-app.get('/health', (req, res) => res.status(200).send('OK'));
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/health', (req, res) => {
+    res.status(200).send('OK - Serveur actif');
+});
 
-// --- PARSER SSE SIMPLE ---
-function parseSSE(buffer) {
-    const text = buffer.toString('utf8');
-    const lines = text.split('\n');
-    const events = [];
-    let currentData = '';
-    
-    for (const line of lines) {
-        if (line.startsWith('data: ')) {
-            currentData += line.slice(6);
-        } else if (line === '' && currentData) {
-            events.push(currentData.trim());
-            currentData = '';
-        }
-    }
-    if (currentData) events.push(currentData.trim());
-    
-    return events;
-}
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
-// --- ROUTE STREAMING ---
+// Route chat NON-streaming (plus stable)
 app.post('/api/chat', upload.single('file'), async (req, res) => {
     const { message, sessionId, version, enableSearch } = req.body;
     const file = req.file;
 
-    if (!sessionId) return res.status(400).json({ error: 'Session ID requis' });
-    if (!sessionHistories[sessionId]) sessionHistories[sessionId] = [];
+    console.log('Requête reçue:', { sessionId, version, message: message?.substring(0, 50) });
 
-    // Headers SSE
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
+    if (!sessionId) {
+        return res.status(400).json({ error: 'Session ID requis' });
+    }
 
-    const sendChunk = (text) => {
-        res.write(`data: ${JSON.stringify({ type: 'chunk', text })}\n\n`);
-    };
-
-    const sendDone = (fullText) => {
-        res.write(`data: ${JSON.stringify({ type: 'done', text: fullText })}\n\n`);
-        res.end();
-    };
-
-    const sendError = (err) => {
-        res.write(`data: ${JSON.stringify({ type: 'error', error: err.message || err })}\n\n`);
-        res.end();
-    };
+    if (!sessionHistories[sessionId]) {
+        sessionHistories[sessionId] = [];
+    }
 
     try {
-        // Traitement du fichier
+        // Traitement fichier
         let currentTurnParts = [];
         if (message) currentTurnParts.push({ type: "text", text: message });
 
@@ -94,13 +75,12 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
                 });
             } else {
                 const textContent = fileBuffer.length < 50000 ? fileBuffer.toString('utf-8') : '[Fichier trop volumineux]';
-                currentTurnParts.push({ type: "text", text: `Contenu de ${file.originalname}:\n${textContent}` });
+                currentTurnParts.push({ type: "text", text: `Fichier ${file.originalname}:\n${textContent}` });
             }
         }
 
         if (currentTurnParts.length === 0) {
-            sendError('Message ou fichier requis');
-            return;
+            return res.status(400).json({ error: 'Message requis' });
         }
 
         sessionHistories[sessionId].push({ role: 'user', content: currentTurnParts });
@@ -108,27 +88,34 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
             sessionHistories[sessionId] = sessionHistories[sessionId].slice(-20);
         }
 
-        let fullResponse = '';
+        let aiResponse = '';
 
         if (version === '1.0') {
-            if (!GEMINI_KEY) throw new Error('Clé Gemini (r.txt) manquante');
-            fullResponse = await streamGemini(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch, sendChunk);
+            // GEMINI
+            if (!GEMINI_KEY) throw new Error('Clé Gemini manquante (r.txt)');
+            aiResponse = await callGemini(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch);
         } else {
-            if (!QWEN_KEY) throw new Error('Clé Qwen (api.txt) manquante');
-            fullResponse = await streamQwen(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch, sendChunk);
+            // QWEN
+            if (!QWEN_KEY) throw new Error('Clé Qwen manquante (api.txt)');
+            aiResponse = await callQwen(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch);
         }
 
-        sessionHistories[sessionId].push({ role: 'assistant', content: fullResponse });
-        sendDone(fullResponse);
+        sessionHistories[sessionId].push({ role: 'assistant', content: aiResponse });
+        
+        console.log('Réponse envoyée avec succès');
+        res.json({ response: aiResponse });
 
     } catch (error) {
-        console.error('Erreur:', error.response?.data || error.message);
-        sendError(error);
+        console.error('ERREUR:', error.message);
+        console.error(error.response?.data || error);
+        res.status(500).json({ 
+            error: error.message || 'Erreur serveur',
+            details: error.response?.data?.message || error.toString()
+        });
     }
 });
 
-// --- STREAMING QWEN ---
-async function streamQwen(history, systemPrompt, enableSearch, onChunk) {
+async function callQwen(history, systemPrompt, enableSearch) {
     const messages = [
         { role: 'system', content: systemPrompt },
         ...history.map(msg => ({
@@ -140,59 +127,28 @@ async function streamQwen(history, systemPrompt, enableSearch, onChunk) {
         }))
     ];
 
-    const payload = {
-        model: 'qwen-vl-max',
-        messages,
-        temperature: 0.7,
-        max_tokens: 8000,
-        stream: true,
-        stream_options: { include_usage: false }
-    };
-
-    if (enableSearch) payload.enable_search = true;
-
     const response = await axios.post(
         'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions',
-        payload,
         {
-            headers: { 'Authorization': `Bearer ${QWEN_KEY}`, 'Content-Type': 'application/json' },
-            responseType: 'stream',
-            timeout: 120000
+            model: 'qwen-vl-max',
+            messages,
+            temperature: 0.7,
+            max_tokens: 8000,
+            ...(enableSearch && { enable_search: true })
+        },
+        {
+            headers: { 
+                'Authorization': `Bearer ${QWEN_KEY}`, 
+                'Content-Type': 'application/json' 
+            },
+            timeout: 60000
         }
     );
-
-    return new Promise((resolve, reject) => {
-        let fullText = '';
-        let buffer = '';
-
-        response.data.on('data', (chunk) => {
-            buffer += chunk.toString();
-            const events = parseSSE(buffer);
-            
-            for (const event of events) {
-                if (event === '[DONE]') {
-                    resolve(fullText);
-                    return;
-                }
-                try {
-                    const data = JSON.parse(event);
-                    if (data.choices && data.choices[0]?.delta?.content) {
-                        const text = data.choices[0].delta.content;
-                        fullText += text;
-                        onChunk(text);
-                    }
-                } catch (e) {}
-            }
-            buffer = '';
-        });
-
-        response.data.on('end', () => resolve(fullText));
-        response.data.on('error', reject);
-    });
+    
+    return response.data.choices[0].message.content;
 }
 
-// --- STREAMING GEMINI ---
-async function streamGemini(history, systemPrompt, enableSearch, onChunk) {
+async function callGemini(history, systemPrompt, enableSearch) {
     const contents = history.map(msg => {
         const role = msg.role === 'assistant' ? 'model' : 'user';
         let parts = [];
@@ -224,42 +180,17 @@ async function streamGemini(history, systemPrompt, enableSearch, onChunk) {
         }];
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${GEMINI_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
     
     const response = await axios.post(url, payload, {
         headers: { 'Content-Type': 'application/json' },
-        responseType: 'stream',
-        timeout: 120000
+        timeout: 60000
     });
-
-    return new Promise((resolve, reject) => {
-        let fullText = '';
-        let buffer = '';
-
-        response.data.on('data', (chunk) => {
-            buffer += chunk.toString();
-            const events = parseSSE(buffer);
-            
-            for (const event of events) {
-                if (event === '[DONE]') {
-                    resolve(fullText);
-                    return;
-                }
-                try {
-                    const data = JSON.parse(event);
-                    if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-                        const text = data.candidates[0].content.parts[0].text;
-                        fullText += text;
-                        onChunk(text);
-                    }
-                } catch (e) {}
-            }
-            buffer = '';
-        });
-
-        response.data.on('end', () => resolve(fullText));
-        response.data.on('error', reject);
-    });
+    
+    return response.data.candidates[0].content.parts[0].text;
 }
 
-app.listen(PORT, () => console.log(`Oméga démarré sur le port ${PORT}`));
+app.listen(PORT, () => {
+    console.log(`✅ Serveur Oméga démarré sur le port ${PORT}`);
+    console.log(`📡 Santé: http://localhost:${PORT}/health`);
+});
