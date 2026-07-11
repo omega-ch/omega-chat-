@@ -186,7 +186,7 @@ async function callQwen(history, systemPrompt, enableSearch) {
     ];
 
     const payload = {
-        model: 'qwen-vl-max',
+        model: 'qwen3-max',
         messages,
         temperature: 0.7,
         max_tokens: 8000
