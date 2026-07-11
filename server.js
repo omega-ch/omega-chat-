@@ -18,34 +18,36 @@ let QWEN_KEY = '';
 let GEMINI_KEY = '';
 let SYSTEM_PROMPT = 'Tu es Oméga, un assistant IA avancé capable de recherche web et de génération de code.';
 
-// Charger Qwen (api.txt)
-try {
-    QWEN_KEY = fs.readFileSync(path.join(__dirname, 'api.txt'), 'utf8').trim();
-} catch (e) {
-    console.warn('api.txt non trouvé ou vide');
-}
+try { QWEN_KEY = fs.readFileSync(path.join(__dirname, 'api.txt'), 'utf8').trim(); } catch (e) {}
+try { GEMINI_KEY = fs.readFileSync(path.join(__dirname, 'r.txt'), 'utf8').trim(); } catch (e) {}
+try { SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'config.txt'), 'utf8').trim(); } catch (e) {}
 
-// Charger Gemini (r.txt)
-try {
-    GEMINI_KEY = fs.readFileSync(path.join(__dirname, 'r.txt'), 'utf8').trim();
-} catch (e) {
-    console.warn('r.txt non trouvé ou vide');
-}
-
-// Charger le system prompt commun (config.txt)
-try {
-    SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'config.txt'), 'utf8').trim();
-} catch (e) {
-    console.warn('config.txt non trouvé, utilisation du prompt par défaut');
-}
-
-// Stockage des sessions
 const sessionHistories = {};
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// --- ROUTE PRINCIPALE DU CHAT ---
+// --- PARSER SSE SIMPLE ---
+function parseSSE(buffer) {
+    const text = buffer.toString('utf8');
+    const lines = text.split('\n');
+    const events = [];
+    let currentData = '';
+    
+    for (const line of lines) {
+        if (line.startsWith('data: ')) {
+            currentData += line.slice(6);
+        } else if (line === '' && currentData) {
+            events.push(currentData.trim());
+            currentData = '';
+        }
+    }
+    if (currentData) events.push(currentData.trim());
+    
+    return events;
+}
+
+// --- ROUTE STREAMING ---
 app.post('/api/chat', upload.single('file'), async (req, res) => {
     const { message, sessionId, version, enableSearch } = req.body;
     const file = req.file;
@@ -53,8 +55,28 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
     if (!sessionId) return res.status(400).json({ error: 'Session ID requis' });
     if (!sessionHistories[sessionId]) sessionHistories[sessionId] = [];
 
+    // Headers SSE
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    const sendChunk = (text) => {
+        res.write(`data: ${JSON.stringify({ type: 'chunk', text })}\n\n`);
+    };
+
+    const sendDone = (fullText) => {
+        res.write(`data: ${JSON.stringify({ type: 'done', text: fullText })}\n\n`);
+        res.end();
+    };
+
+    const sendError = (err) => {
+        res.write(`data: ${JSON.stringify({ type: 'error', error: err.message || err })}\n\n`);
+        res.end();
+    };
+
     try {
-        // 1. Traitement du fichier/image
+        // Traitement du fichier
         let currentTurnParts = [];
         if (message) currentTurnParts.push({ type: "text", text: message });
 
@@ -76,39 +98,37 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
             }
         }
 
-        if (currentTurnParts.length === 0) return res.status(400).json({ error: 'Message ou fichier requis' });
+        if (currentTurnParts.length === 0) {
+            sendError('Message ou fichier requis');
+            return;
+        }
 
         sessionHistories[sessionId].push({ role: 'user', content: currentTurnParts });
         if (sessionHistories[sessionId].length > 20) {
             sessionHistories[sessionId] = sessionHistories[sessionId].slice(-20);
         }
 
-        let aiResponse = '';
+        let fullResponse = '';
 
-        // 2. Routage vers la bonne version
         if (version === '1.0') {
             if (!GEMINI_KEY) throw new Error('Clé Gemini (r.txt) manquante');
-            aiResponse = await callGeminiAPI(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch);
+            fullResponse = await streamGemini(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch, sendChunk);
         } else {
             if (!QWEN_KEY) throw new Error('Clé Qwen (api.txt) manquante');
-            aiResponse = await callQwenAPI(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch);
+            fullResponse = await streamQwen(sessionHistories[sessionId], SYSTEM_PROMPT, enableSearch, sendChunk);
         }
 
-        sessionHistories[sessionId].push({ role: 'assistant', content: aiResponse });
-        res.json({ response: aiResponse });
+        sessionHistories[sessionId].push({ role: 'assistant', content: fullResponse });
+        sendDone(fullResponse);
 
     } catch (error) {
-        console.error('Erreur API:', error.response?.data || error.message);
-        res.status(500).json({ 
-            error: 'Erreur IA', 
-            details: error.response?.data?.message || error.message 
-        });
+        console.error('Erreur:', error.response?.data || error.message);
+        sendError(error);
     }
 });
 
-// --- FONCTIONS D'APPEL API ---
-
-async function callQwenAPI(history, systemPrompt, enableSearch) {
+// --- STREAMING QWEN ---
+async function streamQwen(history, systemPrompt, enableSearch, onChunk) {
     const messages = [
         { role: 'system', content: systemPrompt },
         ...history.map(msg => ({
@@ -125,28 +145,54 @@ async function callQwenAPI(history, systemPrompt, enableSearch) {
         messages,
         temperature: 0.7,
         max_tokens: 8000,
+        stream: true,
+        stream_options: { include_usage: false }
     };
 
-    if (enableSearch) {
-        payload.enable_search = true;
-    }
+    if (enableSearch) payload.enable_search = true;
 
     const response = await axios.post(
         'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions',
         payload,
-        { 
-            headers: { 
-                'Authorization': `Bearer ${QWEN_KEY}`, 
-                'Content-Type': 'application/json' 
-            },
-            timeout: 60000
+        {
+            headers: { 'Authorization': `Bearer ${QWEN_KEY}`, 'Content-Type': 'application/json' },
+            responseType: 'stream',
+            timeout: 120000
         }
     );
-    
-    return response.data.choices[0].message.content;
+
+    return new Promise((resolve, reject) => {
+        let fullText = '';
+        let buffer = '';
+
+        response.data.on('data', (chunk) => {
+            buffer += chunk.toString();
+            const events = parseSSE(buffer);
+            
+            for (const event of events) {
+                if (event === '[DONE]') {
+                    resolve(fullText);
+                    return;
+                }
+                try {
+                    const data = JSON.parse(event);
+                    if (data.choices && data.choices[0]?.delta?.content) {
+                        const text = data.choices[0].delta.content;
+                        fullText += text;
+                        onChunk(text);
+                    }
+                } catch (e) {}
+            }
+            buffer = '';
+        });
+
+        response.data.on('end', () => resolve(fullText));
+        response.data.on('error', reject);
+    });
 }
 
-async function callGeminiAPI(history, systemPrompt, enableSearch) {
+// --- STREAMING GEMINI ---
+async function streamGemini(history, systemPrompt, enableSearch, onChunk) {
     const contents = history.map(msg => {
         const role = msg.role === 'assistant' ? 'model' : 'user';
         let parts = [];
@@ -165,32 +211,55 @@ async function callGeminiAPI(history, systemPrompt, enableSearch) {
     });
 
     const payload = {
-        contents: contents,
+        contents,
         systemInstruction: { parts: [{ text: systemPrompt }] },
-        generationConfig: {
-            maxOutputTokens: 8000,
-            temperature: 0.7
-        }
+        generationConfig: { maxOutputTokens: 8000, temperature: 0.7 }
     };
 
     if (enableSearch) {
         payload.tools = [{
             google_search_retrieval: {
-                dynamic_retrieval_config: {
-                    mode: "MODE_DYNAMIC",
-                    dynamic_threshold: 0.3
-                }
+                dynamic_retrieval_config: { mode: "MODE_DYNAMIC", dynamic_threshold: 0.3 }
             }
         }];
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
-    const response = await axios.post(url, payload, { 
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 60000
-    });
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${GEMINI_KEY}`;
     
-    return response.data.candidates[0].content.parts[0].text;
+    const response = await axios.post(url, payload, {
+        headers: { 'Content-Type': 'application/json' },
+        responseType: 'stream',
+        timeout: 120000
+    });
+
+    return new Promise((resolve, reject) => {
+        let fullText = '';
+        let buffer = '';
+
+        response.data.on('data', (chunk) => {
+            buffer += chunk.toString();
+            const events = parseSSE(buffer);
+            
+            for (const event of events) {
+                if (event === '[DONE]') {
+                    resolve(fullText);
+                    return;
+                }
+                try {
+                    const data = JSON.parse(event);
+                    if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+                        const text = data.candidates[0].content.parts[0].text;
+                        fullText += text;
+                        onChunk(text);
+                    }
+                } catch (e) {}
+            }
+            buffer = '';
+        });
+
+        response.data.on('end', () => resolve(fullText));
+        response.data.on('error', reject);
+    });
 }
 
-app.listen(PORT, () => console.log(`Serveur Oméga démarré sur le port ${PORT}`));
+app.listen(PORT, () => console.log(`Oméga démarré sur le port ${PORT}`));
