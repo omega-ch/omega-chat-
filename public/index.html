@@ -2,175 +2,95 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Oméga Chat - IA Avancée</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Oméga Chat</title>
     <link rel="stylesheet" href="style.css">
-    
-    <!-- Markdown & Code Highlighting -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.0/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    
-    <!-- Icônes -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
     <div class="app-container">
-        
-        <!-- ===== SIDEBAR ===== -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="logo">
                     <div class="logo-icon">Ω</div>
                     <div class="logo-text">
                         <h2>Oméga</h2>
-                        <span class="version-badge">v2.0</span>
+                        <span class="version-badge">v2.1</span>
                     </div>
                 </div>
-                <button class="icon-btn" id="close-sidebar" title="Fermer">
-                    <i class="fas fa-times"></i>
-                </button>
+                <button class="icon-btn" id="close-sidebar"><i class="fas fa-times"></i></button>
             </div>
-            
-            <button class="new-chat-btn" id="new-chat-btn">
-                <i class="fas fa-plus"></i>
-                <span>Nouvelle conversation</span>
-            </button>
-            
-            <div class="conversations-list" id="conversations-list">
-                <!-- Conversations ajoutées dynamiquement -->
-            </div>
-            
+            <button class="new-chat-btn" id="new-chat-btn"><i class="fas fa-plus"></i><span>Nouvelle conversation</span></button>
+            <div class="conversations-list" id="conversations-list"></div>
             <div class="sidebar-footer">
-                <button class="theme-toggle" id="theme-toggle">
-                    <i class="fas fa-moon"></i>
-                    <span>Mode sombre</span>
-                </button>
-                <div class="credits">
-                    <small>Propulsé par Qwen & Gemini</small>
-                </div>
+                <button class="theme-toggle" id="theme-toggle"><i class="fas fa-moon"></i><span>Mode sombre</span></button>
+                <div class="credits"><small>Propulsé par Qwen & Gemini</small></div>
             </div>
         </aside>
-        
-        <!-- ===== MAIN CHAT AREA ===== -->
+
         <main class="main-content">
-            
-            <!-- Header -->
             <header class="chat-header">
-                <button class="icon-btn menu-btn" id="menu-btn" title="Menu">
-                    <i class="fas fa-bars"></i>
-                </button>
-                
+                <button class="icon-btn menu-btn" id="menu-btn"><i class="fas fa-bars"></i></button>
                 <div class="header-info">
                     <h1 id="chat-title">Nouvelle conversation</h1>
-                    <div class="model-indicator" id="model-indicator">
-                        <span class="model-dot"></span>
-                        <span class="model-name">Oméga 1.5</span>
-                    </div>
+                    <div class="model-indicator"><span class="model-dot"></span><span class="model-name">Oméga 1.5</span></div>
                 </div>
-                
                 <div class="header-controls">
                     <div class="search-toggle" title="Recherche Web">
                         <label>
                             <input type="checkbox" id="search-toggle">
-                            <span class="toggle-slider">
-                                <i class="fas fa-globe"></i>
-                            </span>
+                            <span class="toggle-slider"><i class="fas fa-globe"></i></span>
                         </label>
                     </div>
-                    
                     <select id="version-select" class="model-select">
                         <option value="1.5">⚡ Oméga 1.5</option>
                         <option value="1.0">🚀 Oméga 1.0</option>
                     </select>
-                    
-                    <button class="icon-btn" id="clear-chat-btn" title="Effacer la conversation">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                    <button class="icon-btn" id="clear-chat-btn" title="Effacer"><i class="fas fa-trash"></i></button>
                 </div>
             </header>
-            
-            <!-- Messages Area -->
+
             <div class="chat-messages" id="chat-messages">
                 <div class="welcome-screen" id="welcome-screen">
                     <div class="welcome-icon">Ω</div>
                     <h2>Bienvenue sur Oméga</h2>
-                    <p>Votre assistant IA avancé avec recherche web et génération de code</p>
-                    
+                    <p>Votre assistant IA avec streaming temps réel</p>
                     <div class="features-grid">
-                        <div class="feature-card">
-                            <i class="fas fa-code"></i>
-                            <h3>Code complet</h3>
-                            <p>Génération de code fonctionnel dans tous les langages</p>
-                        </div>
-                        <div class="feature-card">
-                            <i class="fas fa-search"></i>
-                            <h3>Recherche Web</h3>
-                            <p>Accès aux informations à jour en temps réel</p>
-                        </div>
-                        <div class="feature-card">
-                            <i class="fas fa-image"></i>
-                            <h3>Vision</h3>
-                            <p>Analyse d'images et de documents</p>
-                        </div>
-                        <div class="feature-card">
-                            <i class="fas fa-brain"></i>
-                            <h3>Mémoire</h3>
-                            <p>Contexte conservé durant la conversation</p>
-                        </div>
+                        <div class="feature-card"><i class="fas fa-code"></i><h3>Code complet</h3><p>Génération en temps réel</p></div>
+                        <div class="feature-card"><i class="fas fa-search"></i><h3>Recherche Web</h3><p>Infos à jour</p></div>
+                        <div class="feature-card"><i class="fas fa-image"></i><h3>Vision</h3><p>Analyse d'images</p></div>
+                        <div class="feature-card"><i class="fas fa-brain"></i><h3>Mémoire</h3><p>Contexte conservé</p></div>
                     </div>
                 </div>
             </div>
-            
-            <!-- File Preview -->
+
             <div class="file-preview" id="file-preview" style="display: none;">
                 <div class="file-preview-content">
                     <i class="fas fa-paperclip"></i>
                     <span id="file-preview-name">fichier.txt</span>
-                    <button class="remove-file" id="remove-file">
-                        <i class="fas fa-times"></i>
-                    </button>
+                    <button class="remove-file" id="remove-file"><i class="fas fa-times"></i></button>
                 </div>
             </div>
-            
-            <!-- Input Area -->
+
             <div class="input-area">
                 <div class="input-wrapper">
-                    <label for="file-input" class="attach-btn" title="Joindre un fichier">
-                        <i class="fas fa-paperclip"></i>
-                    </label>
+                    <label for="file-input" class="attach-btn"><i class="fas fa-paperclip"></i></label>
                     <input type="file" id="file-input" style="display: none;" accept="image/*,.txt,.md,.js,.py,.html,.css,.json,.csv">
-                    
-                    <textarea 
-                        id="user-input" 
-                        placeholder="Écrivez votre message... (Shift+Enter pour un retour à la ligne)"
-                        rows="1"
-                        autocomplete="off"
-                    ></textarea>
-                    
-                    <button id="send-btn" title="Envoyer (Entrée)">
-                        <i class="fas fa-paper-plane"></i>
-                    </button>
+                    <textarea id="user-input" placeholder="Écrivez votre message..." rows="1" autocomplete="off"></textarea>
+                    <button id="send-btn" title="Envoyer"><i class="fas fa-paper-plane"></i></button>
                 </div>
-                
-                <div class="input-footer">
-                    <small>Oméga peut faire des erreurs. Vérifiez les informations importantes.</small>
-                </div>
+                <div class="input-footer"><small>Oméga peut faire des erreurs. Vérifiez les infos importantes.</small></div>
             </div>
-            
-            <!-- Loading Indicator -->
+
             <div id="loading" class="loading" style="display: none;">
-                <div class="typing-indicator">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </div>
+                <div class="typing-indicator"><span></span><span></span><span></span></div>
                 <span class="loading-text">Oméga réfléchit...</span>
             </div>
-            
         </main>
     </div>
-
     <script src="script.js"></script>
 </body>
-    </html>
+            </html>
